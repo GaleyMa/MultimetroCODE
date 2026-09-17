@@ -56,3 +56,8 @@
 #define REL_CAPACIT 13
 #define RELE_ON LOW
 #define RELE_OFF HIGH
+
+// ---------- Generador de funciones (Fase 2) ----------
+#define PIN_GEN_OUT 47  // salida PWM-DAC -> RC -> LM358 (x3) -> 0-10V
+#define GEN_LEDC_CH 2   // canal LEDC (ch0 lo usa el test-gen de frecuencia)
+#define GEN_TIMER_NUM 1 // timer HW para el muestreo (0..3 libres; PCNT no los usa)

@@ -1,5 +1,6 @@
 #include "servidor.h"
 #include "config.h"
+#include "generador.h"
 #include <WiFi.h>
 #include <WebServer.h>
 
@@ -29,22 +30,65 @@ static const char PAGINA[] PROGMEM = R"HTML(
         background:#fff;color:#222;cursor:pointer}
  button.activo{background:#2b6cb0;color:#fff}
  #estado{text-align:center;font-size:13px;color:#666;margin-top:14px}
+ #multipanel{display:none}
+ #genpanel{display:none;background:#fff;border-radius:12px;padding:14px;margin-top:10px}
+ .ondas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:6px}
+ .ondas button{padding:12px 4px;font-size:14px}
+ .ctrl{margin:14px 0}
+ .ctrl .lab{display:flex;justify-content:space-between;font-size:13px;color:#555;margin-bottom:6px}
+ .ctrl input[type=range]{width:100%}
+ .genfila{display:flex;gap:8px;align-items:center}
+ .genfila input[type=range]{flex:1}
+ .genfila input[type=number]{width:88px;padding:8px;border:1px solid #ccc;border-radius:8px;
+        font-size:14px;text-align:center}
 </style></head><body>
 <h1>Multimetro</h1>
-<div id="valor">--</div>
-<div class="modos">
-  <button onclick="setModo(1)" id="b1">Corriente</button>
-  <button onclick="setModo(2)" id="b2">Voltaje</button>
-  <button onclick="setModo(3)" id="b3">Resistencia</button>
-  <button onclick="setModo(4)" id="b4">Capacitancia</button>
-  <button onclick="setModo(5)" id="b5">Frecuencia</button>
-  <button onclick="setModo(6)" id="b6">Continuidad</button>
+<div style="margin-bottom:10px">
+  <button onclick="toggleMulti()" id="bmulti" style="width:100%">Multímetro</button>
+</div>
+<div id="multipanel">
+  <div id="valor">--</div>
+  <div class="modos">
+    <button onclick="setModo(1)" id="b1">Corriente</button>
+    <button onclick="setModo(2)" id="b2">Voltaje</button>
+    <button onclick="setModo(3)" id="b3">Resistencia</button>
+    <button onclick="setModo(4)" id="b4">Capacitancia</button>
+    <button onclick="setModo(5)" id="b5">Frecuencia</button>
+    <button onclick="setModo(6)" id="b6">Continuidad</button>
+  </div>
 </div>
 <div style="margin-top:14px">
   <button onclick="toggleOsc()" id="bosc" style="width:100%">Osciloscopio</button>
 </div>
 <canvas id="osc" width="320" height="180"
         style="width:100%;background:#fff;border-radius:10px;margin-top:10px;display:none"></canvas>
+
+<div style="margin-top:10px">
+  <button onclick="toggleGen()" id="bgen" style="width:100%">Generador</button>
+</div>
+<div id="genpanel">
+  <div class="ondas">
+    <button onclick="setOnda('sine')" id="w_sine" class="activo">Seno</button>
+    <button onclick="setOnda('tri')"  id="w_tri">Triangular</button>
+    <button onclick="setOnda('sq')"   id="w_sq">Cuadrada</button>
+  </div>
+  <div class="ctrl">
+    <div class="lab"><span>Frecuencia</span><span id="fval">1000 Hz</span></div>
+    <div class="genfila">
+      <input type="range" id="fslider" min="1" max="10000" value="1000"
+             oninput="genFreq(this.value,false)" onchange="genFreq(this.value,true)">
+      <input type="number" id="fnum" min="1" max="10000" value="1000"
+             onchange="genFreq(this.value,true)">
+    </div>
+  </div>
+  <div class="ctrl">
+    <div class="lab"><span>Amplitud</span><span id="aval">80 %</span></div>
+    <input type="range" id="aslider" min="0" max="100" value="80"
+           oninput="genAmp(this.value,false)" onchange="genAmp(this.value,true)">
+  </div>
+  <button onclick="genToggleOut()" id="bout" style="width:100%">Salida: OFF</button>
+</div>
+
 <div id="estado">conectado</div>
 <script>
 let modo = 1;
@@ -164,6 +208,57 @@ function dibujarOsc(){
     g.fillText(ms+' ms', W-46, H-5);
   });
 }
+function toggleMulti(){
+  const p = document.getElementById('multipanel');
+  const vis = p.style.display === 'block';
+  p.style.display = vis ? 'none' : 'block';
+  document.getElementById('bmulti').className = vis ? '' : 'activo';
+}
+// ---------------- Generador de funciones ----------------
+let gen = {w:'sine', f:1000, a:80, on:false};
+
+function toggleGen(){
+  const p = document.getElementById('genpanel');
+  const vis = p.style.display === 'block';
+  p.style.display = vis ? 'none' : 'block';
+  document.getElementById('bgen').className = vis ? '' : 'activo';
+}
+
+function genSend(){
+  const a = gen.on ? gen.a : 0;               // OFF -> amplitud 0 (apaga la salida)
+  fetch('/gen?w='+gen.w+'&f='+gen.f+'&a='+a).catch(()=>{});
+}
+
+function setOnda(w){
+  gen.w = w;
+  for(const id of ['sine','tri','sq'])
+    document.getElementById('w_'+id).className = (id===w)?'activo':'';
+  if(gen.on) genSend();
+}
+
+function fmtHz(f){ return f>=1000 ? (f/1000).toFixed(f%1000?1:0)+' kHz' : f+' Hz'; }
+
+function genFreq(v, enviar){
+  gen.f = Math.min(10000, Math.max(1, parseInt(v)||1));
+  document.getElementById('fslider').value = gen.f;
+  document.getElementById('fnum').value = gen.f;
+  document.getElementById('fval').textContent = fmtHz(gen.f);
+  if(enviar && gen.on) genSend();
+}
+
+function genAmp(v, enviar){
+  gen.a = Math.min(100, Math.max(0, parseInt(v)||0));
+  document.getElementById('aval').textContent = gen.a + ' %';
+  if(enviar && gen.on) genSend();
+}
+
+function genToggleOut(){
+  gen.on = !gen.on;
+  const b = document.getElementById('bout');
+  b.textContent = 'Salida: ' + (gen.on ? 'ON' : 'OFF');
+  b.className = gen.on ? 'activo' : '';
+  genSend();
+}
 
 setModo(1);
 setInterval(actualizar, 1500);
@@ -172,50 +267,61 @@ setInterval(actualizar, 1500);
 
 static void handleRaiz()
 {
-    server.send_P(200, "text/html", PAGINA);
+  server.send_P(200, "text/html", PAGINA);
 }
 
 static void handleMedir()
 {
-    String v = leer_medicion();
-    String json = "{\"v\":\"" + v + "\",\"m\":" + String(modo_activo) + "}";
-    server.send(200, "application/json", json);
+  String v = leer_medicion();
+  String json = "{\"v\":\"" + v + "\",\"m\":" + String(modo_activo) + "}";
+  server.send(200, "application/json", json);
 }
 
 static void handleModo()
 {
-    if (server.hasArg("m"))
-    {
-        int m = server.arg("m").toInt();
-        if (m >= 1 && m <= 6)
-            cambiar_modo(m);
-    }
-    server.send(200, "text/plain", "ok");
+  if (server.hasArg("m"))
+  {
+    int m = server.arg("m").toInt();
+    if (m >= 1 && m <= 6)
+      cambiar_modo(m);
+  }
+  server.send(200, "text/plain", "ok");
 }
 
 static void handleOsc()
 {
-    server.send(200, "application/json", capturar_osciloscopio());
+  server.send(200, "application/json", capturar_osciloscopio());
+}
+
+static void handleGen()
+{
+  String w = server.hasArg("w") ? server.arg("w") : "sine";
+  float f = server.hasArg("f") ? server.arg("f").toFloat() : 1000.0f;
+  int a = server.hasArg("a") ? server.arg("a").toInt() : 100;
+  generador_aplicar(w, f, a);
+  server.send(200, "application/json",
+              "{\"w\":\"" + w + "\",\"f\":" + String(f, 1) + ",\"a\":" + String(a) + "}");
 }
 
 void servidor_setup()
 {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASS);
-    Serial.print("[servidor] AP: ");
-    Serial.println(AP_SSID);
-    Serial.print("[servidor] IP: ");
-    Serial.println(WiFi.softAPIP());
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  Serial.print("[servidor] AP: ");
+  Serial.println(AP_SSID);
+  Serial.print("[servidor] IP: ");
+  Serial.println(WiFi.softAPIP());
 
-    server.on("/", handleRaiz);
-    server.on("/medir", handleMedir);
-    server.on("/modo", handleModo);
-    server.on("/osc", handleOsc);
-    server.begin();
-    Serial.println("[servidor] Listo. Conectate y abre la IP.");
+  server.on("/", handleRaiz);
+  server.on("/medir", handleMedir);
+  server.on("/modo", handleModo);
+  server.on("/osc", handleOsc);
+  server.on("/gen", handleGen);
+  server.begin();
+  Serial.println("[servidor] Listo. Conectate y abre la IP.");
 }
 
 void servidor_loop()
 {
-    server.handleClient();
+  server.handleClient();
 }

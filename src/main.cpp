@@ -8,6 +8,7 @@
 #include "capacitancia.h"
 #include "continuidad.h"
 #include "servidor.h"
+#include "generador.h"
 
 #define MODO_CORRIENTE 1
 #define MODO_VOLTAJE 2
@@ -194,7 +195,8 @@ void setup()
   delay(50);
   init_modo(modo_activo); // inicializa ese modo
 
-  servidor_setup(); // levanta el AP y el servidor web
+  generador_setup(); // inicializa el generador de funciones (Fase 2)
+  servidor_setup();  // levanta el AP y el servidor web
 }
 
 // ---------------- Loop ----------------
