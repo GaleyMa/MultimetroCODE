@@ -1,0 +1,221 @@
+#include "servidor.h"
+#include "config.h"
+#include <WiFi.h>
+#include <WebServer.h>
+
+// El main expone estas funciones
+extern int modo_activo;
+extern void cambiar_modo(int nuevo);
+extern String leer_medicion();         // valor puntual ya formateado
+extern String capturar_osciloscopio(); // bloque de muestras en JSON
+
+static WebServer server(80);
+
+static const char *AP_SSID = "Multimetr Mayra";
+static const char *AP_PASS = "12345678"; // minimo 8 caracteres
+
+static const char PAGINA[] PROGMEM = R"HTML(
+<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Multimetro</title>
+<style>
+ body{font-family:sans-serif;margin:0;padding:16px;background:#f2f2f2;color:#222}
+ h1{font-size:20px;font-weight:500;text-align:center;margin:8px 0 16px}
+ #valor{font-size:44px;text-align:center;padding:24px 8px;background:#fff;
+        border-radius:12px;margin-bottom:16px;font-variant-numeric:tabular-nums}
+ .modos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+ button{padding:16px;font-size:16px;border:none;border-radius:10px;
+        background:#fff;color:#222;cursor:pointer}
+ button.activo{background:#2b6cb0;color:#fff}
+ #estado{text-align:center;font-size:13px;color:#666;margin-top:14px}
+</style></head><body>
+<h1>Multimetro</h1>
+<div id="valor">--</div>
+<div class="modos">
+  <button onclick="setModo(1)" id="b1">Corriente</button>
+  <button onclick="setModo(2)" id="b2">Voltaje</button>
+  <button onclick="setModo(3)" id="b3">Resistencia</button>
+  <button onclick="setModo(4)" id="b4">Capacitancia</button>
+  <button onclick="setModo(5)" id="b5">Frecuencia</button>
+  <button onclick="setModo(6)" id="b6">Continuidad</button>
+</div>
+<div style="margin-top:14px">
+  <button onclick="toggleOsc()" id="bosc" style="width:100%">Osciloscopio</button>
+</div>
+<canvas id="osc" width="320" height="180"
+        style="width:100%;background:#fff;border-radius:10px;margin-top:10px;display:none"></canvas>
+<div id="estado">conectado</div>
+<script>
+let modo = 1;
+let sonando = false;
+let audioCtx = null;
+let oscAudio = null;
+
+function initAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if(audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function beepOn(){
+  if(sonando || !audioCtx) return;
+  oscAudio = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  oscAudio.type = 'square';
+  oscAudio.frequency.value = 2000;
+  gain.gain.value = 0.08;
+  oscAudio.connect(gain).connect(audioCtx.destination);
+  oscAudio.start();
+  sonando = true;
+}
+
+function beepOff(){
+  if(!sonando) return;
+  oscAudio.stop();
+  oscAudio.disconnect();
+  sonando = false;
+}
+
+function setModo(m){
+  initAudio();
+  beepOff();
+  modo = m;
+  fetch('/modo?m='+m);
+  for(let i=1;i<=6;i++){
+    document.getElementById('b'+i).className = (i===m)?'activo':'';
+  }
+  document.getElementById('valor').textContent = '--';
+}
+
+let historial = [];
+
+function actualizar(){
+  fetch('/medir').then(r=>r.json()).then(d=>{
+    // extrae el numero del texto (ej. "32.45 kOhm" -> 32.45)
+    const num = parseFloat(d.v);
+    const unidad = d.v.replace(/^[\d.-]+\s*/, '');
+
+    if(!isNaN(num) && modo === 3){
+      historial.push(num);
+      if(historial.length > 5) historial.shift();   // ultimas 5 lecturas
+      const prom = historial.reduce((a,b)=>a+b,0) / historial.length;
+      document.getElementById('valor').textContent = prom.toFixed(2) + ' ' + unidad;
+    } else {
+      historial = [];
+      document.getElementById('valor').textContent = d.v;
+    }
+
+    document.getElementById('estado').textContent = 'conectado';
+    if(modo === 6 && d.v === 'CONTINUIDAD'){
+      beepOn();
+      if(navigator.vibrate) navigator.vibrate(50);
+    } else {
+      beepOff();
+    }
+  }).catch(()=>{
+    document.getElementById('estado').textContent = 'sin conexion';
+    beepOff();
+  });
+}
+
+let oscOn = false;
+let oscTimer = null;
+
+function toggleOsc(){
+  oscOn = !oscOn;
+  document.getElementById('osc').style.display = oscOn ? 'block' : 'none';
+  document.getElementById('bosc').className = oscOn ? 'activo' : '';
+  if(oscOn){
+    setModo(2);
+    oscTimer = setInterval(dibujarOsc, 500);
+  } else {
+    clearInterval(oscTimer);
+  }
+}
+
+function dibujarOsc(){
+  fetch('/osc').then(r=>r.json()).then(d=>{
+    const c = document.getElementById('osc');
+    const g = c.getContext('2d');
+    const W = c.width, H = c.height;
+    g.clearRect(0,0,W,H);
+
+    g.strokeStyle = '#e0e0e0'; g.lineWidth = 1;
+    for(let i=1;i<5;i++){
+      g.beginPath(); g.moveTo(0,H*i/5); g.lineTo(W,H*i/5); g.stroke();
+      g.beginPath(); g.moveTo(W*i/5,0); g.lineTo(W*i/5,H); g.stroke();
+    }
+
+    const max = Math.max(1, ...d.d);
+    g.strokeStyle = '#2b6cb0'; g.lineWidth = 2;
+    g.beginPath();
+    d.d.forEach((v,i)=>{
+      const x = i * W / (d.d.length-1);
+      const y = H - (v/max)*H*0.92 - 4;
+      i===0 ? g.moveTo(x,y) : g.lineTo(x,y);
+    });
+    g.stroke();
+
+    g.fillStyle = '#666'; g.font = '11px sans-serif';
+    g.fillText(max.toFixed(1)+' V', 4, 12);
+    const ms = (d.dt * d.d.length / 1000).toFixed(1);
+    g.fillText(ms+' ms', W-46, H-5);
+  });
+}
+
+setModo(1);
+setInterval(actualizar, 1500);
+</script></body></html>
+)HTML";
+
+static void handleRaiz()
+{
+    server.send_P(200, "text/html", PAGINA);
+}
+
+static void handleMedir()
+{
+    String v = leer_medicion();
+    String json = "{\"v\":\"" + v + "\",\"m\":" + String(modo_activo) + "}";
+    server.send(200, "application/json", json);
+}
+
+static void handleModo()
+{
+    if (server.hasArg("m"))
+    {
+        int m = server.arg("m").toInt();
+        if (m >= 1 && m <= 6)
+            cambiar_modo(m);
+    }
+    server.send(200, "text/plain", "ok");
+}
+
+static void handleOsc()
+{
+    server.send(200, "application/json", capturar_osciloscopio());
+}
+
+void servidor_setup()
+{
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    Serial.print("[servidor] AP: ");
+    Serial.println(AP_SSID);
+    Serial.print("[servidor] IP: ");
+    Serial.println(WiFi.softAPIP());
+
+    server.on("/", handleRaiz);
+    server.on("/medir", handleMedir);
+    server.on("/modo", handleModo);
+    server.on("/osc", handleOsc);
+    server.begin();
+    Serial.println("[servidor] Listo. Conectate y abre la IP.");
+}
+
+void servidor_loop()
+{
+    server.handleClient();
+}

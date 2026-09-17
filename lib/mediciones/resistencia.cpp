@@ -35,7 +35,7 @@ float resistencia_medir()
     {
         seleccionar_canal(i);
         delay(5);
-        uint16_t raw = adc_read_avg(CH_RES_JUNCTION, 8); // CH2 = vía buffer
+        uint16_t raw = adc_read_avg(CH_RES_JUNCTION, 32); // CH2 = vía buffer
         int delta = abs((int)raw - 2048);
         if (delta < mejorDelta)
         {

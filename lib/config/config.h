@@ -20,10 +20,10 @@
 #define INA_SAT 32000  // umbral de saturacion (tope +-32767)
 
 // ---------- Calibracion VOLTAJE (2 puntos, contra fuente de banco) ----------
-#define V_CAL_BAJO 2.08f
-#define RAW_CAL_BAJO 210.0f
-#define V_CAL_ALTO 19.98f
-#define RAW_CAL_ALTO 2033.0f
+#define V_CAL_BAJO 5.61f
+#define RAW_CAL_BAJO 987.0f
+#define V_CAL_ALTO 20.0f
+#define RAW_CAL_ALTO 3483.0f
 
 // ---------- Canales del ADC asignados a cada modo ----------
 #define CH_VOLTAJE 0 // voltaje usa CH0
@@ -44,7 +44,15 @@
 #define PIN_FREC_GEN 17 // generador de prueba (quitar en versión final)
 
 // ---------- Capacitancia ----------
-#define PIN_CAP_CARGA 21   // GPIO que carga el cap (HIGH = cargar)
-#define PIN_CAP_DESCARGA 2 // GPIO al gate del 2N7000 (HIGH = descargar)
-#define CH_CAP 3           // nodo del cap en CH3 del MCP3208
-#define R_CARGA 1000.0     // resistencia de carga (ohms)
+#define PIN_CARGA_ALTA 21  // GPIO con la R de 1M  (para nF)
+#define PIN_CARGA_BAJA 1   // GPIO con la R de 1k  (para uF) - ajusta a un pin libre
+#define PIN_CAP_DESCARGA 2 // gate del 2N7000
+#define CH_CAP 3           // nodo (via buffer) en CH3
+
+// ---------- Pines de control de relés ----------
+#define REL_CORRIENTE 10
+#define REL_VOLTAJE 11
+#define REL_RESIST 12
+#define REL_CAPACIT 13
+#define RELE_ON LOW
+#define RELE_OFF HIGH
