@@ -8,9 +8,9 @@
 //  El AD9833 no se usa: las tres ondas salen del ESP32.
 // ============================================================================
 
-#define GEN_PWM_BITS 8         // 256 niveles
-#define GEN_PWM_CARRIER 312500 // Hz portadora PWM (80MHz/256), muy por encima del RC
-#define GEN_SAMPLE_RATE 100000 // Hz del ISR. 1e6/GEN_SAMPLE_RATE debe ser ENTERO (aqui 10)
+#define GEN_PWM_BITS 6         // antes: 8
+#define GEN_PWM_CARRIER 500000 // antes: 150000 — ahora ~3.3x más lejos del corte RC
+#define GEN_SAMPLE_RATE 125000 // Hz del ISR. 1e6/GEN_SAMPLE_RATE debe ser ENTERO (aqui 10)
 #define GEN_LUT_SIZE 256
 
 // Tablas 0..255. Minimo en 0 -> onda unipolar (valle 0, pico en el maximo),
@@ -18,6 +18,7 @@
 static uint8_t lutSine[GEN_LUT_SIZE];
 static uint8_t lutTri[GEN_LUT_SIZE];
 static uint8_t lutSqr[GEN_LUT_SIZE];
+static uint32_t g_lfsr = 0xACE1u; // semilla del generador pseudoaleatorio
 
 // Estado compartido ISR <-> web (volatile). Escrituras de 32 bits son atomicas.
 volatile uint32_t g_phase = 0;
@@ -28,10 +29,15 @@ volatile bool g_on = false;
 
 static hw_timer_t *g_timer = nullptr;
 
-// ---- ISR: saca una muestra por tick ----
-// NOTA IRAM: ledcWrite no esta garantizado IRAM-safe. En la practica corre bien
-// en el S3 con la cache activa. Si vieras crashes tipo "Cache disabled but cached
-// memory region accessed", baja GEN_SAMPLE_RATE o escribe el registro de duty directo.
+static inline uint8_t gen_dither_bit()
+{
+    // LFSR de 16 bits, rápido y determinista, suficiente para dither
+    g_lfsr ^= g_lfsr << 7;
+    g_lfsr ^= g_lfsr >> 9;
+    g_lfsr ^= g_lfsr << 8;
+    return (uint8_t)(g_lfsr & 0x0F); // ruido de 0 a 15
+}
+
 void IRAM_ATTR gen_isr()
 {
     if (!g_on)
@@ -40,11 +46,14 @@ void IRAM_ATTR gen_isr()
         return;
     }
     g_phase += g_phaseInc;
-    uint8_t idx = g_phase >> 24;                         // 8 bits altos -> indice LUT
-    uint16_t duty = ((uint16_t)g_lut[idx] * g_amp) >> 8; // escala amplitud (0..255)
+    uint8_t idx = g_phase >> 24;
+    uint16_t raw = ((uint16_t)g_lut[idx] * g_amp);              // producto sin truncar aún (16 bits)
+    uint16_t dithered = raw + gen_dither_bit();                 // suma el ruido antes de truncar
+    uint16_t duty = (((uint16_t)g_lut[idx] * g_amp) >> 8) >> 2; // >>2 extra: escala de 8 bits a 6 bits
+    if (duty > 255)
+        duty = 255; // clamp por si el dither se pasa
     ledcWrite(GEN_LEDC_CH, duty);
 }
-
 static void gen_build_luts()
 {
     for (int i = 0; i < GEN_LUT_SIZE; i++)
