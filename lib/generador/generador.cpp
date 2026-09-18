@@ -8,9 +8,9 @@
 //  El AD9833 no se usa: las tres ondas salen del ESP32.
 // ============================================================================
 
-#define GEN_PWM_BITS 6         // antes: 8
-#define GEN_PWM_CARRIER 500000 // antes: 150000 — ahora ~3.3x más lejos del corte RC
-#define GEN_SAMPLE_RATE 125000 // Hz del ISR. 1e6/GEN_SAMPLE_RATE debe ser ENTERO (aqui 10)
+#define GEN_PWM_BITS 8
+#define GEN_PWM_CARRIER 150000
+#define GEN_SAMPLE_RATE 50000
 #define GEN_LUT_SIZE 256
 
 // Tablas 0..255. Minimo en 0 -> onda unipolar (valle 0, pico en el maximo),
@@ -47,9 +47,9 @@ void IRAM_ATTR gen_isr()
     }
     g_phase += g_phaseInc;
     uint8_t idx = g_phase >> 24;
-    uint16_t raw = ((uint16_t)g_lut[idx] * g_amp);              // producto sin truncar aún (16 bits)
-    uint16_t dithered = raw + gen_dither_bit();                 // suma el ruido antes de truncar
-    uint16_t duty = (((uint16_t)g_lut[idx] * g_amp) >> 8) >> 2; // >>2 extra: escala de 8 bits a 6 bits
+    uint16_t raw = ((uint16_t)g_lut[idx] * g_amp); // producto sin truncar aún (16 bits)
+    uint16_t dithered = raw + gen_dither_bit();    // suma el ruido antes de truncar
+    uint16_t duty = dithered >> 8;                 // >>2 extra: escala de 8 bits a 6 bits
     if (duty > 255)
         duty = 255; // clamp por si el dither se pasa
     ledcWrite(GEN_LEDC_CH, duty);
